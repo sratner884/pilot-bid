@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilot Schedule Bid</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #637083; --line: #dde2ea;
+    --accent: #1f5fbf; --accent-text: #ffffff; --danger: #b42318; --danger-bg: #fdecea; --ok: #1a7f45; --ok-bg: #e5f5ec;
+    --off: #c9cfd8; --train: #ffe14d; --pos: #fff3a6; --vac: #5b9cf0; --hac: #9b7be8; --hol: #92d050;
+    --wk: #eef1f5; --sel: #ffb347; --event: #e25c5c; --safety: #7a3e9d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b; --panel: #1b2029; --text: #e6e9ef; --muted: #98a2b3; --line: #2c3340;
+      --accent: #5b9cf0; --accent-text: #0b1220; --danger: #ff8a80; --danger-bg: #3a1f1f; --ok: #6fd69b; --ok-bg: #173225;
+      --off: #4a5361; --train: #b59b12; --pos: #6b5f1e; --vac: #3f78c4; --hac: #6e55b8; --hol: #5d8a2e; --wk: #232a35; --sel: #d98a2b; --event: #d06060; --safety: #c08ae0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151b; --panel: #1b2029; --text: #e6e9ef; --muted: #98a2b3; --line: #2c3340;
+    --accent: #5b9cf0; --accent-text: #0b1220; --danger: #ff8a80; --danger-bg: #3a1f1f; --ok: #6fd69b; --ok-bg: #173225;
+    --off: #4a5361; --train: #b59b12; --pos: #6b5f1e; --vac: #3f78c4; --hac: #6e55b8; --hol: #5d8a2e; --wk: #232a35; --sel: #d98a2b; --event: #d06060; --safety: #c08ae0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 17px; margin: 0; }
+  nav { display: flex; gap: 4px; }
+  nav button { background: none; border: 1px solid transparent; padding: 6px 12px; border-radius: 6px; color: var(--muted); font-weight: 600; cursor: pointer; }
+  nav button.active { color: var(--text); border-color: var(--line); background: var(--bg); }
+  .spacer { flex: 1; }
+  main { max-width: 1400px; margin: 0 auto; padding: 20px 16px 60px; }
+  section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+  section.card h2 { font-size: 15px; margin: 0 0 4px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+  label.f { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); font-weight: 600; }
+  input, select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  input[type=number] { width: 80px; }
+  textarea { width: 100%; min-height: 64px; font-family: ui-monospace, monospace; font-size: 12px; }
+  button.btn { font: inherit; font-weight: 600; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  button.btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.btn:disabled { opacity: .45; cursor: default; }
+  button.mini { font-size: 12px; padding: 2px 7px; border-radius: 5px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  table.t { border-collapse: collapse; width: 100%; }
+  table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 5px 6px; text-align: left; vertical-align: middle; }
+  table.t th { font-size: 12px; color: var(--muted); }
+  table.t input[type=text] { width: 100%; min-width: 80px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .chip { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+  .warn { background: var(--danger-bg); color: var(--danger); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  .warn ul { margin: 4px 0 0; padding-left: 18px; }
+  .okbox { background: var(--ok-bg); color: var(--ok); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  .hidden { display: none !important; }
+  .turn { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .turn .who { font-size: 20px; font-weight: 700; }
+  .turn .sub { color: var(--muted); }
+  .lines { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .linecard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; background: var(--bg); }
+  .linecard.taken { opacity: .55; }
+  .linecard b { font-size: 15px; }
+  .cal { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+  .month h4 { margin: 0 0 4px; font-size: 13px; }
+  .mgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .mgrid .wd { font-size: 10px; color: var(--muted); text-align: center; }
+  .d { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; border-radius: 4px; position: relative; user-select: none; }
+  .d.work { background: var(--ok-bg); color: var(--ok); cursor: pointer; border: 1px solid transparent; }
+  .d.work:hover { border-color: var(--ok); }
+  .d.blocked { background: var(--wk); color: var(--muted); cursor: not-allowed; }
+  .d.plain { background: var(--panel); border: 1px solid var(--line); }
+  .practice { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); gap: 6px; align-items: center; }
+  .d.c-OFF { background: var(--off); }
+  .d.c-T, .d.c-OFFT { background: var(--train); color: #000; }
+  .d.c-P, .d.c-OFFP { background: var(--pos); }
+  .d.c-V { background: var(--vac); color: #fff; }
+  .d.c-HAC { background: var(--hac); color: #fff; }
+  .d.c-H { background: var(--hol); }
+  .d.sel { outline: 2px solid var(--sel); outline-offset: -2px; background: var(--sel); color: #000; }
+  .d .hd, .d .ev { position: absolute; top: 2px; right: 2px; width: 5px; height: 5px; border-radius: 50%; }
+  .d .hd { background: var(--hol); outline: 1px solid var(--panel); }
+  .d .ev { background: var(--event); right: 8px; }
+  .d .sd { position: absolute; top: 2px; left: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--safety); outline: 1px solid var(--panel); }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 8px 0 12px; }
+  .legend span::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; background: var(--sw); }
+  .selbox { position: sticky; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); padding: 10px 0 0; margin-top: 12px; }
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+  table.grid { border-collapse: collapse; font-size: 10px; }
+  table.grid td, table.grid th { border-right: 1px solid var(--line); min-width: 18px; height: 20px; text-align: center; padding: 0; }
+  table.grid th.lab, table.grid td.lab { position: sticky; left: 0; background: var(--panel); text-align: left; padding: 0 8px; min-width: 150px; white-space: nowrap; z-index: 1; font-size: 12px; }
+  table.grid tr.mh th { font-size: 11px; text-align: left; padding-left: 3px; border-bottom: 1px solid var(--line); }
+  table.grid td.we { background: var(--wk); }
+  table.grid td.c-OFF { background: var(--off); }
+  table.grid td.c-T, table.grid td.c-OFFT { background: var(--train); color: #000; }
+  table.grid td.c-P, table.grid td.c-OFFP { background: var(--pos); }
+  table.grid td.c-H { background: var(--hol); }
+  table.grid td.c-V { background: var(--vac); color: #fff; }
+  table.grid td.c-HAC { background: var(--hac); color: #fff; }
+  table.grid td.short { background: var(--danger-bg); color: var(--danger); font-weight: 700; }
+  table.grid tr.me td.lab { font-weight: 700; color: var(--accent); }
+  .rank { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .rank h4 { margin: 0 0 6px; font-size: 13px; }
+  .rank ol { margin: 0; padding: 0; list-style: none; }
+  .rank li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+  .rank li { display: flex; align-items: center; gap: 8px; }
+  .rank li > span:first-child { flex: 1; }
+  .rank .mv { display: flex; gap: 4px; }
+  .rank .mv .btn { padding: 4px 11px; font-size: 15px; line-height: 1.2; }
+  .rankadd { display: block; width: 100%; text-align: left; margin: 0 0 6px; }
+  .hchips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .hchip { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); white-space: nowrap; }
+  .hchip.c-V { background: var(--vac); color: #fff; border-color: transparent; }
+  .hchip.c-HAC { background: var(--hac); color: #fff; border-color: transparent; }
+  .hchip.c-H { background: var(--hol); color: #000; border-color: transparent; }
+  table.picks td { vertical-align: top; min-width: 140px; }
+  table.picks tr.me td { background: var(--ok-bg); }
+  .hchip.won { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); font-weight: 600; }
+  .hchip.lost { color: var(--muted); text-decoration: line-through; }
+  .turnlist { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 4px 0 12px; background: var(--bg); }
+  .turnlist h4 { margin: 0 0 6px; font-size: 13px; }
+  .turnlist ul { list-style: none; margin: 0; padding: 0; }
+  .turnlist li { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+  .turnlist li span { flex: 1; }
+  .turnlist .btn { padding: 3px 10px; font-size: 13px; }
+  .log { font-size: 13px; max-height: 260px; overflow: auto; }
+  .log div { padding: 3px 0; border-bottom: 1px dashed var(--line); }
+  @media (max-width: 640px) { header { padding: 10px 16px; } main { padding: 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pilot Schedule Bid</h1>
+  <nav>
+    <button data-tab="setup" class="active">1 · Setup</button>
+    <button data-tab="bid">2 · Bidding</button>
+    <button data-tab="results">3 · Results</button>
+  </nav>
+  <span class="spacer"></span>
+  <span id="fileStatus" class="hint" style="margin:0"></span>
+  <button class="btn" id="saveBid" title="Save everything (spreadsheet, settings, picks) to one file">Save bid file</button>
+  <label class="btn" id="openBidLabel" style="cursor:pointer">Open bid file<input type="file" id="openBid" accept=".json,.bid" hidden></label>
+</header>
+
+<main>
+  <!-- SETUP -->
+  <div id="tab-setup">
+    <section class="card">
+      <h2>Template spreadsheet</h2>
+      <p class="hint">Choose the bid packet workbook and the sheet with this year's lines. The finished schedule is written back into this sheet.</p>
+      <div class="row">
+        <label class="f">Workbook<input type="file" id="fileIn" accept=".xlsx"></label>
+        <label class="f">Sheet<select id="sheetSel"></select></label>
+      </div>
+      <div id="tplSummary"></div>
+    </section>
+
+    <section class="card">
+      <h2>Staffing limits</h2>
+      <p class="hint">Minimum pilots available (same rule as the sheet's "Pilots Required" rows). A day off can't be picked if it would drop availability below this.</p>
+      <div class="row" id="limits"></div>
+    </section>
+
+    <section class="card">
+      <h2>Pilots</h2>
+      <p class="hint">Seniority 1 picks first in every round. Type a seniority number to move a pilot, or use the ↑ ↓ buttons. Initials link pilots to their training blocks. Leave an allowance blank to use the default.</p>
+      <div class="row" style="margin-bottom:10px">
+        <label class="f">Default V days / year<input type="number" min="0" id="allowV"></label>
+        <label class="f">Default HAC days / year<input type="number" min="0" id="allowHAC"></label>
+        <label class="f">HAC written as<input type="text" id="hacText" style="width:70px"></label>
+        <span class="spacer"></span>
+        <label class="f">Copy names from<select id="rosterSheet"></select></label>
+        <button class="btn" id="copyRoster">Copy</button>
+        <button class="btn" id="addPilot">+ Add pilot</button>
+      </div>
+      <div id="pilots"></div>
+    </section>
+
+    <section class="card">
+      <h2>Rounds</h2>
+      <p class="hint">Round 1 is the line pick. Each round after it gives every pilot a number of V, HAC and holiday days. "Min in a row" is the shortest group of days off a pick can make: a lone single day isn't allowed, but a single day added next to days off the pilot already has is. "Min working days between groups" stops a pick from leaving just one working day between two groups of days off: a pick must either touch other days off or leave at least that many working days. Set either to 1 or 0 to switch it off. The yearly V and HAC allowances under Pilots cap the total across all rounds.</p>
+      <div id="rounds"></div>
+      <button class="btn" id="addRound" style="margin-top:8px">+ Add round</button>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:14px"><input type="checkbox" id="requireApproval">
+        <span><b>Admin approves each turn.</b> When a pilot finishes a turn, it waits for the admin to approve it (or send it back to the pilot) before the next pilot is up.</span></label>
+    </section>
+
+    <section class="card">
+      <h2>Training</h2>
+      <p class="hint">Read from the yellow TRAINING row. Dates are the whole shaded window, from the position day out to the position day back. When a pilot picks a line, their sessions are put on it: P the day before, T on training days, P the day after. If training lands on a day off, it's written as "OFF T" / "OFF P", the same as in 2025.</p>
+      <div id="training"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn" id="addTraining">+ Add session</button>
+        <label class="f">Position days<select id="pcode"><option value="P">Write P (P T T T T T P, as in 2025)</option><option value="T">Write T (whole window T, as in the 2026 sheet)</option></select></label>
+        <label class="f">Training on a day off<select id="tmode"><option value="mark">Write "OFF T" / "OFF P"</option><option value="replace">Write "T" / "P"</option></select></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Holidays, events and safety/training days</h2>
+      <p class="hint">Dates as YYYY-MM-DD, separated by spaces or new lines. Events (Board / MT dates) use the event staffing limit. Safety and company training days (marked "Safety Day" or "training" under the dates in the sheet) use the safety & training limit, which is checked first.</p>
+      <div class="row" style="align-items:stretch">
+        <label class="f" style="flex:1;min-width:240px">Holidays<textarea id="holidays"></textarea></label>
+        <label class="f" style="flex:2;min-width:240px">Event dates<textarea id="events"></textarea></label>
+        <label class="f" style="flex:1;min-width:200px">Safety & training days<textarea id="safetyDays"></textarea></label>
+      </div>
+    </section>
+    <div class="row"><button class="btn primary" id="toBid">Go to bidding →</button></div>
+  </div>
+
+  <!-- BIDDING -->
+  <div id="tab-bid" class="hidden">
+    <section class="card viewbar">
+      <div class="row" style="align-items:center">
+        <label class="f" style="flex-direction:row;align-items:center;gap:8px;font-size:14px;color:var(--text)">View as <select id="viewAs"><option value="admin">Admin</option></select></label>
+        <span class="hint" id="viewHint" style="margin:0"></span>
+      </div>
+    </section>
+    <section class="card" id="turnCard"></section>
+    <section class="card">
+      <h2>Schedule</h2>
+      <div class="legend" id="legend2"></div>
+      <div class="scroll" id="grid"></div>
+    </section>
+    <section class="card" id="pickCard"></section>
+    <section class="card hidden" id="rankCard"></section>
+    <section class="card" id="summaryCard"></section>
+    <section class="card">
+      <h2>Bid log</h2>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="tab-results" class="hidden">
+    <section class="card">
+      <h2>Finished spreadsheet</h2>
+      <p class="hint">Writes pilot names next to their lines plus P/T/V/HAC codes into the template sheet. Everything else in the workbook stays as it was. Excel recalculates the counts when you open it.</p>
+      <div id="resultStatus"></div>
+      <button class="btn primary" id="download" style="margin-top:10px">Download spreadsheet</button>
+    </section>
+    <section class="card">
+      <h2>Picks by pilot</h2>
+      <div id="resultGrid"></div>
+    </section>
+    <section class="card">
+      <h2>Days used per pilot</h2>
+      <div id="usage"></div>
+    </section>
+    <section class="card">
+      <h2>Holiday rankings and awards</h2>
+      <div id="awards"></div>
+    </section>
+    <section class="card">
+      <h2>Days below staffing minimum</h2>
+      <div id="short"></div>
+    </section>
+  </div>
+</main>
+
+<script src="engine.js"></script>
+<script src="xlsx.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
