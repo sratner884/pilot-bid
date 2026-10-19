@@ -42,7 +42,9 @@
       return p && p.getAttribute('patternType') === 'solid' && fg ? (fg.getAttribute('rgb') || '').toUpperCase() : '';
     });
     const xfFill = kids(kid(styles.documentElement, 'cellXfs'), 'xf').map(x => fills[Number(x.getAttribute('fillId') || 0)] || '');
-    return { zip, sheets, shared, xfFill };
+    // The hidden bid sheet is kept apart so it never shows up as a sheet to bid from.
+    const stateSheet = sheets.find(sh => sh.name === STATE_SHEET) || null;
+    return { zip, sheets: sheets.filter(sh => sh !== stateSheet), stateSheet, shared, xfFill };
   }
 
   // Load a sheet into rows: Map(rowNum -> Map(colNum -> {v, fill}))
@@ -249,18 +251,25 @@
     return head + cells.map(c => c.xml).join('') + '</row>';
   }
 
-  // Produce the finished workbook: pilot names on chosen lines plus P/T/V/HAC codes.
-  async function writeResults(wb, template, state) {
+  // Hidden sheet that carries a saved bid inside the workbook, so it can be reopened to continue.
+  const STATE_SHEET = 'PilotBid data';
+  const CHUNK = 30000; // Excel cells hold up to 32,767 characters
+
+  // Produce the workbook: pilot names on chosen lines plus P/T/V/X/H codes. Cells are compared with
+  // what's currently in the file (a saved bid may already have picks in it), so undone picks are cleared.
+  // opts.stateJson: the bid to embed in the hidden sheet; without it any hidden bid sheet is removed.
+  async function writeResults(wb, template, state, opts = {}) {
     const sheet = wb.sheets.find(s => s.name === template.sheetName);
     let xml = await wb.zip.file(sheet.path).async('string');
     const byRow = new Map();
+    const hacText = (state.config.codeText && state.config.codeText.HAC) || 'HAC';
     for (const line of state.lines) {
-      const orig = template.lines.find(l => l.row === line.row);
+      const inFile = (template.fileLines || template.lines).find(l => l.row === line.row);
       const changes = new Map();
       const pilot = line.pilotId ? state.byId.get(line.pilotId) : null;
-      if (pilot) changes.set(1, pilot.name);
-      const hacText = (state.config.codeText && state.config.codeText.HAC) || 'HAC';
-      line.cells.forEach((c, i) => { if (c !== orig.cells[i]) changes.set(template.firstCol + i, c === 'HAC' ? hacText : c); });
+      const name = pilot ? pilot.name : '';
+      if (name !== (inFile.name || '')) changes.set(1, name);
+      line.cells.forEach((c, i) => { if (c !== inFile.cells[i]) changes.set(template.firstCol + i, c === 'HAC' ? hacText : c); });
       if (changes.size) byRow.set(line.row, changes);
     }
     xml = xml.replace(/<row\b[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g, rowXml => {
@@ -269,6 +278,7 @@
     });
     const out = await JSZip.loadAsync(await wb.zip.generateAsync({ type: "arraybuffer" }), { createFolders: false });
     out.file(sheet.path, xml, { createFolders: false });
+    await setStateSheet(out, opts.stateJson || null);
     // Ask Excel to recalculate the count/availability formulas when the file is opened.
     let wbx = await out.file('xl/workbook.xml').async('string');
     if (/<calcPr\b/.test(wbx)) {
@@ -278,5 +288,51 @@
     return out.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
   }
 
-  root.Xlsx = { openWorkbook, readTemplate, readRoster, writeResults, patchRow, serialToIso, colToNum, numToCol };
+  // Add, update or (json = null) remove the hidden bid sheet.
+  async function setStateSheet(zip, json) {
+    let wbx = await zip.file('xl/workbook.xml').async('string');
+    let rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+    let ct = await zip.file('[Content_Types].xml').async('string');
+    const tag = wbx.match(/<sheet\b[^>]*\bname="PilotBid data"[^>]*\/>/);
+    let path;
+    if (tag) {
+      const rid = tag[0].match(/r:id="([^"]+)"/)[1];
+      const rel = rels.match(new RegExp(`<Relationship\\b[^>]*\\bId="${rid}"[^>]*/>`))[0];
+      path = resolveTarget(rel.match(/Target="([^"]+)"/)[1]);
+      if (!json) {
+        wbx = wbx.replace(tag[0], '');
+        rels = rels.replace(rel, '');
+        ct = ct.replace(new RegExp(`<Override\\b[^>]*PartName="/${path}"[^>]*/>`), '');
+        zip.remove(path);
+      }
+    } else {
+      if (!json) return;
+      const sid = Math.max(0, ...Array.from(wbx.matchAll(/\bsheetId="(\d+)"/g), m => Number(m[1]))) + 1;
+      let k = 1; while (zip.file(`xl/worksheets/sheet${k}.xml`)) k++;
+      path = `xl/worksheets/sheet${k}.xml`;
+      const rid = 'rIdPilotBid';
+      wbx = wbx.replace('</sheets>', `<sheet name="${STATE_SHEET}" sheetId="${sid}" state="hidden" r:id="${rid}"/></sheets>`);
+      rels = rels.replace('</Relationships>', `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${k}.xml"/></Relationships>`);
+      ct = ct.replace('</Types>', `<Override PartName="/${path}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`);
+    }
+    if (json) {
+      const rows = [];
+      for (let i = 0, r = 1; i < json.length; i += CHUNK, r++) rows.push(`<row r="${r}"><c r="A${r}" t="inlineStr"><is><t>${xmlEscape(json.slice(i, i + CHUNK))}</t></is></c></row>`);
+      zip.file(path, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows.join('')}</sheetData></worksheet>`, { createFolders: false });
+    }
+    zip.file('xl/workbook.xml', wbx, { createFolders: false });
+    zip.file('xl/_rels/workbook.xml.rels', rels, { createFolders: false });
+    zip.file('[Content_Types].xml', ct, { createFolders: false });
+  }
+
+  // The bid saved inside a workbook, or null if it's a plain spreadsheet.
+  async function readState(wb) {
+    const sheet = wb.stateSheet;
+    if (!sheet) return null;
+    const doc = parseXml(await wb.zip.file(sheet.path).async('string'));
+    const text = Array.from(doc.getElementsByTagNameNS('*', 'c')).map(textOf).join('');
+    return JSON.parse(text);
+  }
+
+  root.Xlsx = { STATE_SHEET, openWorkbook, readTemplate, readRoster, readState, writeResults, patchRow, serialToIso, colToNum, numToCol };
 })(this);

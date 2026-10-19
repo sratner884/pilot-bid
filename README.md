@@ -35,7 +35,7 @@ Open `index.html` in Chrome, Edge or Firefox. There's nothing to install. It nee
 
 ## Saving
 
-Progress is saved automatically in this browser. Use **Save bid file** to keep a backup, or to continue on another computer. The bid file holds the spreadsheet, settings and every pick, and **Open bid file** restores it.
+Progress is saved automatically in this browser. **Save bid (Excel)** downloads an Excel workbook with everything picked so far written into the sheet, so it can be opened in Excel. The workbook also carries the bid itself (settings, pilots, picks) in a hidden sheet, so **Open saved bid** (or loading it under Setup) carries on exactly where it left off, on this or another computer. Older `.json` bid files still open. The final **Download spreadsheet** on Results leaves the hidden sheet out.
 
 ## Files
 

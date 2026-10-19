@@ -7,7 +7,7 @@
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const STORE = 'pilotbid.v1';
 
-  const S = { fileName: '', fileB64: '', sheetName: '', wb: null, template: null, config: null, picks: [], state: null, sel: [], viewAs: 'admin', code: 'V', rank: [], rankFor: '' };
+  const S = { fileName: '', fileB64: '', sheetName: '', wb: null, template: null, config: null, picks: [], state: null, sel: [], viewAs: 'admin', code: 'V', rank: [], rankFor: '', original: null, origWarnings: null };
 
   // ---------- persistence ----------
   function toB64(buf) {
@@ -16,7 +16,13 @@
     return btoa(s);
   }
   function fromB64(b64) { const s = atob(b64); const a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a.buffer; }
-  function snapshot() { return { version: 1, fileName: S.fileName, fileB64: S.fileB64, sheetName: S.sheetName, config: S.config, picks: S.picks }; }
+  function snapshot() { return { version: 1, fileName: S.fileName, fileB64: S.fileB64, sheetName: S.sheetName, config: S.config, picks: S.picks, original: S.original, warnings: S.origWarnings }; }
+  // The bid as stored in the hidden sheet of a saved Excel file: settings, picks, and the lines as they
+  // were before any picks (the visible sheet in that file already has the picks written in).
+  function bidState() {
+    return { app: 'PilotBid', version: 2, savedAt: new Date().toISOString(), fileName: S.fileName, sheetName: S.sheetName, config: S.config, picks: S.picks,
+      original: S.template.lines.map(l => ({ row: l.row, name: l.name, cells: l.cells })), warnings: S.template.warnings };
+  }
   function persist() { try { localStorage.setItem(STORE, JSON.stringify(snapshot())); } catch (e) { /* storage full or blocked: bid file still works */ } }
   function download(blob, name) {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
@@ -25,20 +31,44 @@
 
   async function restore(snap) {
     S.fileName = snap.fileName; S.fileB64 = snap.fileB64; S.picks = snap.picks || [];
+    S.original = snap.original || null; S.origWarnings = snap.warnings || null;
     S.wb = await Xlsx.openWorkbook(fromB64(snap.fileB64));
     await useSheet(snap.sheetName, snap.config);
   }
 
+  // Continue a bid saved as an Excel file (it carries the bid in a hidden sheet).
+  async function openSavedXlsx(buf, name) {
+    const wb = await Xlsx.openWorkbook(buf);
+    const saved = await Xlsx.readState(wb);
+    if (!saved) throw new Error('This workbook has no saved bid in it. To start a new bid from it, load it under Setup → Workbook.');
+    S.fileName = saved.fileName || name; S.fileB64 = toB64(buf); S.picks = saved.picks || [];
+    S.original = saved.original; S.origWarnings = saved.warnings || [];
+    S.wb = wb;
+    await useSheet(saved.sheetName, saved.config);
+  }
+
   // ---------- loading ----------
   async function loadFile(buf, name) {
-    S.fileName = name; S.fileB64 = toB64(buf); S.picks = []; S.config = null;
     S.wb = await Xlsx.openWorkbook(buf);
+    if (S.wb.stateSheet) { // a saved bid, not a blank template: carry on with it
+      alert('This workbook is a saved bid. Opening it so you can continue where it left off.');
+      return openSavedXlsx(buf, name);
+    }
+    S.fileName = name; S.fileB64 = toB64(buf); S.picks = []; S.config = null; S.original = null; S.origWarnings = null;
     await useSheet(S.wb.sheets[S.wb.sheets.length - 1].name, null);
   }
 
   async function useSheet(name, config) {
     S.sheetName = name;
     S.template = await Xlsx.readTemplate(S.wb, name);
+    if (S.original) {
+      // A saved bid: the sheet already has picks written in. Keep what's in the file (to know what to
+      // change when saving again) and put the lines back as they were before any picks.
+      const t = S.template;
+      t.fileLines = t.lines.map(l => ({ row: l.row, name: l.name, cells: l.cells.slice() }));
+      t.lines = t.lines.map(l => { const o = S.original.find(x => x.row === l.row); return o ? { ...l, name: o.name, cells: o.cells.slice() } : l; });
+      if (S.origWarnings) t.warnings = S.origWarnings;
+    }
     if (config) {
       S.config = E.normalizeConfig(config);
       // Setups saved before safety/training days existed: take them from the sheet.
@@ -690,8 +720,12 @@
       return;
     }
     if (b.id === 'saveBid') {
-      if (!S.fileB64) return alert('Nothing to save yet.');
-      download(new Blob([JSON.stringify(snapshot())], { type: 'application/json' }), `${S.sheetName || 'bid'} bid file.json`);
+      if (!S.fileB64 || !st) return alert('Nothing to save yet.');
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '');
+      Xlsx.writeResults(S.wb, S.template, st, { stateJson: JSON.stringify(bidState()) })
+        .then(blob => download(blob, `${S.fileName.replace(/\.xlsx$/i, '').replace(/ - .* bid( results| saved.*)?$/i, '')} - ${S.sheetName} bid saved ${stamp}.xlsx`))
+        .catch(err => alert('Could not save the bid: ' + err.message));
+      return;
     }
   });
 
@@ -704,14 +738,18 @@
       return;
     }
     if (el.id === 'openBid' && el.files[0]) {
-      el.files[0].text().then(txt => restore(JSON.parse(txt))).catch(err => alert('Could not open that bid file: ' + err.message));
+      const f = el.files[0];
+      const opening = /\.json$/i.test(f.name)
+        ? f.text().then(txt => restore(JSON.parse(txt)))          // older bid files
+        : f.arrayBuffer().then(buf => openSavedXlsx(buf, f.name)); // Excel saves
+      opening.then(() => showTab('bid')).catch(err => alert('Could not open that saved bid: ' + err.message));
       el.value = '';
       return;
     }
     if (!c) return;
     if (el.id === 'sheetSel') {
       if (S.picks.length && !confirm('Switching sheets clears the picks made so far. Continue?')) return renderSetup();
-      S.picks = []; useSheet(el.value, null).catch(err => alert(err.message)); return;
+      S.picks = []; S.original = null; S.origWarnings = null; useSheet(el.value, null).catch(err => alert(err.message)); return;
     }
     if (el.dataset.limit) { c.limits[el.dataset.limit] = Number(el.value) || 0; return refresh(); }
     if (el.id === 'hacText') { c.codeText = { ...(c.codeText || {}), HAC: el.value.trim() || 'HAC' }; return refresh(); }
